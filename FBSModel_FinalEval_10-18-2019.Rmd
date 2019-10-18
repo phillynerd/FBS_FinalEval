@@ -1,0 +1,209 @@
+---
+title: 'FBS Predictions: Are They Working?'
+author: "Jessica Streeter, Data Scientist | Data Informatics"
+date: "10/18/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.align = "center")
+
+library(tidyverse)
+
+
+
+FBSCurrent.Comb <- readRDS("FBSCurrentComb.rds")
+#analyzing the impact of the pilot
+
+FBSdata <- FBSCurrent.Comb %>% 
+  mutate(PredictAfter_Cat = ifelse(PredictAfter >= .20, "High", "Low"),
+         PredictBefore_Cat = ifelse(PredictBefore >= .20, "High", "Low"))
+```
+
+## Overview
+
+In 2017, we implemented a predictive model to assess whether or not a child was likely to be removed from the community either during or after FBS.  Providers were educated over the spring and summer of 2017, and the model was implemented in November of 2017. 
+
+The goal of this model is to help clinical better allocate resources.  Previously, all children were handled as if they were at a high risk of being removed from the community.  By using the model, clinical is able to conduct less frequent reviews with children that are identified as "low risk."  
+
+If the model is working, then we would expect to see no change in the proportion of children that are removed from the community (ie our less frequent reviews are not having an adverse effect on children in FBS).  We also want to continue to minimize the number of children that are identified as "low risk" but who are ultimately removed from the community. 
+
+We also ideally don't want any increase in the proportion of children being removed from the home after FBS.
+
+## Data
+
+All children who used FBS from September 2017 and were discharged by January 2019 are included (n = `r nrow(FBSdata)`).  Of these children, `r nrow(FBSdata[FBSdata$StartedAfterPilot == "StartedInPilot",])` started FBS during or after September 2017 (`r round(nrow(FBSdata[FBSdata$StartedAfterPilot == "StartedInPilot",])/nrow(FBSdata) * 100,2)`%).
+
+## Findings
+
+At this point, all indicators suggest that the changes to the review process have not negatively impacted any group either before/during FBS, or after they complete FBS.  What is particularly impressive is how consistently the model continues to perform despite the myriad of changes to children's treatment options over the last few years. 
+
+We also see a slight decline in the percent of children being removed from the home after FBS.  In the original dataset, 24.83% were removed from the home, compared to 20.44% removed in the current cohort. 
+
+```{r eval = F}
+#for numbers above
+FBSdata %>% 
+  count(FinalRiskincDHS)
+225/(876+225)
+
+FBS.Comb %>% 
+  count(FinalRiskincDHS) 
+606/(1835+606)
+
+```
+
+
+### Modeling before someone completes FBS
+Figure 1 and 2 show the relationship between predicted risk (members with a score >= .2 are considered high risk of community removal) and the actual outcome.  Figure 1 looks at the entire population, while figure 2 checks to see if there's a difference between those that started FBS after the new process, and those that were in FBS before the new process.
+
+In all 3 figures, we continue to see a strong split between the boxes.  This split gets stronger when we focus strictly on members that began FBS after the new process was implemented. Additionally, most of the dots in the "In Community" box are low risk individuals, and most of the dots in the "Removed from Community" box are high risk individuals.  Both of these tell me that the model is doing a good job differentiating between those that are low risk and those that are high risk. 
+```{r Fig1 and 2}
+
+FBSdata %>% 
+  ggplot(aes(x = FinalRiskincDHS, y = PredictBefore)) +
+  geom_jitter(width = .3, aes(color = PredictBefore_Cat)) +
+  geom_boxplot(alpha = 0, outlier.shape = NA) +
+  labs(title = "Figure 1: Prediction Before FBS Vs Reality",
+       subtitle = "All Children",
+       x = "Actual Outcomes",
+       y = "Predicted Risk",
+       color = "Risk Category") +
+  theme_minimal()#+
+  #facet_wrap(~StartedAfterPilot)
+
+```
+```{r Fig2}
+FBSdata %>% 
+  ggplot(aes(x = FinalRiskincDHS, y = PredictBefore)) +
+  geom_jitter(width = .3, aes(color = PredictBefore_Cat)) +
+  geom_boxplot(alpha = 0, outlier.shape = NA) +
+  labs(title = "Figure 2: Prediction Before FBS Vs Reality",
+       subtitle = "Grouped by FBS start date",
+       x = "Actual Outcomes",
+       y = "Predicted Risk",
+       color = "Risk Category") +
+ theme_minimal() +
+  theme(strip.background = element_rect(fill = "grey70", color = NA)) +
+  facet_wrap(~StartedAfterPilot,
+             labeller = as_labeller(c("OverlapPilot" = "Started Before New Process", "StartedInPilot" = "Started After New Process")))
+             
+             
+```
+
+Additionally, the accuracy and potential for harm are both on par with what we saw in the original data.  
+
+Accuracy is how often we correctly categorize people as either high risk or low risk.  For our original data, we had a 65.6% accuracy rate before someone completed FBS treatment. With the current cohort, our accuracy is 70.4% (note that this likely doesn't signify a significant improvement). 
+
+Potential harm is defined as cases when the model predicts someone is low risk, but they are ultimately removed from the community.  Note that clinicians have the discretion to elevate someone's risk if they feel the model is not accurate, but that information hasn't been crosswalked here.  In the original cohort, we had 5.7% of our population experience potential harm as a result of an inaccurate prediction.  In the current cohort, that number is again 5.7%.
+```{r Code for model evaluation numbers, eval = F}
+#Confusion Matrices and performance: Before####
+#original numbers are calculated from objects in the FBSCleanedCodeforBuildingModels.R
+#Original dataset that built the model
+predicted.FBSComb.CalcModelB <- as.factor(ifelse(predicted.FBSComb.CalcModelB > 0.2,1,0)) #makes the cut at .5 and codes 0/1
+levels(predicted.FBSComb.CalcModelB)<-c("P: In Community", "P: Removed From Community")
+table(predicted.FBSComb.CalcModelB)
+
+#Confusion Matrix
+LR.FBSCalcModelB.ConfusionMatrix <- table(predicted.FBSComb.CalcModelB, FBS.Comb$FinalRiskincDHS)
+print(LR.FBSCalcModelB.ConfusionMatrix)
+
+#accuracy
+LR.FBSCalcModelB.TestAccuracy <- sum(diag(LR.FBSCalcModelB.ConfusionMatrix)) / sum(LR.FBSCalcModelB.ConfusionMatrix)
+print(LR.FBSCalcModelB.TestAccuracy) 
+
+#Potential Harm
+LR.FBSCalcModelB.ConfusionMatrix[1,2]/ sum(LR.FBSCalcModelB.ConfusionMatrix)
+
+#Current Dataset
+Current_CM_Before <- table(FBSdata$PredictBefore_Cat, FBSdata$FinalRiskincDHS)
+print(Current_CM_Before)
+
+#Accuracy
+(Current_CM_Before[2,1] + Current_CM_Before[1,2])/sum(Current_CM_Before)
+
+#Potential Harm
+Current_CM_Before[2,1]/sum(Current_CM_Before)
+```
+
+### Modeling after someone completes FBS
+
+As with Figures 1 and 2, Figures 3 and 4 look at the relationship between the predicted risk and the actual outcomes for children, both overall (Figure 3), and by whether or not they started FBS after the new process (Figure 4).
+
+Again, we see strong evidence that this model is performing well and the new processes are not negatively impacting children.  As with our original cohort, we see less overlap between the boxes for the children that remained in the community and the children that were removed from the community, meaning this model is a stronger predictor for removal after children have left FBS.  We again see the in-community box largely containing low-risk children, and the removed from community box largely containing high-risk children.  And performance improved slightly among children that started FBS after the new process.
+
+```{r Fig 4}
+FBSdata %>% 
+  ggplot(aes(x = FinalRiskincDHS, y = PredictAfter)) +
+  geom_jitter(width = .3, aes(color = PredictAfter_Cat)) +
+  geom_boxplot(alpha = .3, outlier.shape = NA) +
+  labs(title = "Figure 3: Prediction Before FBS Vs Reality",
+       subtitle = "All Children",
+       x = "Actual Outcomes",
+       y = "Predicted Risk",
+       color = "Risk Category") +
+  theme_minimal()
+```
+```{r Fig 5}
+FBSdata %>% 
+  ggplot(aes(x = FinalRiskincDHS, y = PredictAfter)) +
+  geom_jitter(width = .3, aes(color = PredictAfter_Cat)) +
+  geom_boxplot(alpha = .3, outlier.shape = NA) +
+   labs(title = "Figure 4: Prediction After FBS Vs Reality",
+       subtitle = "Grouped by FBS start date",
+       x = "Actual Outcomes",
+       y = "Predicted Risk",
+       color = "Risk Category") +
+  theme_minimal() +
+  theme(strip.background = element_rect(fill = "grey70", color = NA)) +
+  facet_wrap(~StartedAfterPilot,
+             labeller = as_labeller(c("OverlapPilot" = "Started Before New Process", "StartedInPilot" = "Started After New Process")))
+```
+
+The accuracy for the original group was 72.4%, and the accuracy for the current cohort was 76.1%.  In the original group, 5.4% of members would have been exposed to potential harm, while 5.9% of current members faced potential harm if we relied strictly on the model. As with the before-FBS modeling, there is no evidence that the model has significantly degraded over time, or that the new review process has negatively impacted our populations.
+
+```{r eval = F}
+#Confusion matrices and performance: After####
+
+#Checking performance on original dataset, this only runs after you run FBSCleanedCodeforBuildingModels
+
+#Confusion Matrix
+LR.FBSCalcModelA.ConfusionMatrix <- table(predicted.FBSComb.CalcModelA, FBS.Comb$FinalRiskincDHS)
+print(LR.FBSCalcModelA.ConfusionMatrix)
+#Percent w potential harm
+LR.FBSCalcModelA.ConfusionMatrix[1,2]/sum(LR.FBSCalcModelA.ConfusionMatrix)
+#Percent w No Harm
+(sum(LR.FBSCalcModelA.ConfusionMatrix) - LR.FBSCalcModelA.ConfusionMatrix[1,2])/sum(LR.FBSCalcModelA.ConfusionMatrix)
+
+#Accuracy of in community predictions
+LR.FBSCalcModelA.TestAccuracy <- sum(diag(LR.FBSCalcModelA.ConfusionMatrix)) / sum(LR.FBSCalcModelA.ConfusionMatrix)
+print(LR.FBSCalcModelA.TestAccuracy) 
+
+#Current data
+#Confusion Matrix 
+Current_CM_After <- table(FBSdata$PredictAfter_Cat, FBSdata$FinalRiskincDHS)
+print(Current_CM_After)
+
+#Percent with potential harm
+Current_CM_After[2,2]/sum(Current_CM_After)
+
+#Percent with no harm
+(sum(Current_CM_After) - Current_CM_After[2,2])/sum(Current_CM_After)
+
+#Accuracy of in-community predictions
+sum(Current_CM_After[1,2], Current_CM_After[2,1])/sum(Current_CM_After)
+
+```
+
+
+## Caveats
+
+There is one major caveat for this analysis.  Since the original analysis, the landscape of available services for children has changed, including the addition of a number of different services.  Due to time constraints, I categorized these new services largely into evaluation, outpatient, STS and other categories for the purposes of this analysis.  But over time, the model should be retrained with proper categorization of these services to ensure that the model takes into consideration the current treatment landscape.  
+
+That being said, I see no evidence that these changes have severely impacted the ability of this model to categorize children as low or high risk.  But it is something that should be considered moving forward.
+
+Additionally, while we identified around 5% of children who are incorrectly identified as low risk but later removed from the community, clinical has the discretion to elevate cases to high risk if they deem necessary.  It would be worthwhile to see if these children were later deemed high risk by clinical.  It would also be worth seeing other cases where children were elevated to high risk and were ultimately able to stay in the community (which would suggest that the higher frequency of reviews helped those children stay in their communities).
+
+## Related sources:
+To see how all new LOCs were categorized for the purposes of modeling, check "!_Jessica S>Care management transformation>CBCAFS>FBS>FBSupdate_10-2019_indiv.xlsx".  There is a sheet titled "ServiceKeyLookup" which includes all the original service categorizations (found in "OrigServiceKey"), plus my ad-hoc categorizations).
+
+The original FBS analysis can be found here: !_Jessica S>Care management transformation>CBCAFS>FBS>FBS Risk Modeling Report 3_27_2017.pdf
